@@ -223,3 +223,204 @@ FROM
 WHERE 
     customer_nm = 'YESYES' 
     AND ship_date >= '2023-02-04';
+
+
+CREATE OR REPLACE FUNCTION fms.func_farm_ship_summary(farm_param varchar)
+RETURNS TABLE(farm varchar, customer varchar, shipped_count BIGINT) AS $$
+	SELECT 
+	ci.farm,
+	sr.customer,
+	COUNT(*) AS shipped_count
+	FROM fms.prod_result pr
+	JOIN fms.chick_info ci ON pr.chick_no = ci.chick_no
+	JOIN fms.ship_result sr ON pr.chick_no = sr.chick_no
+	WHERE pr.pass_fail = 'P' and ci.farm = farm_param
+	GROUP BY ci.farm, sr.customer; 
+$$ LANGUAGE SQL;
+
+
+-- 1. 농장별 고객사별로 납품 횟수 View -> 함수로(함수만들기 복습)
+-- 2. 함수를 스케줄러 잡으로 등록, 파일로 저장(스케줄러 등록 복습)
+-- 3. 저장된 파일의 내용확인(파일로 저장하기 도전), 분마다 저장되는 파일 구분
+
+SELECT * FROM func_farm_ship_summary('A');
+
+COPY(SELECT * from fms.func_farm_ship_summary('A')) TO 'C:/Users/Public/farm_ship_summary.csv' CSV HEADER;
+
+
+SELECT COUNT(*)
+FROM fms.chick_info
+WHERE breeds = 'C1';
+
+CREATE TABLE IF NOT EXISTS fms.prod_log (
+log_id SERIAL PRIMARY KEY,
+chick_no VARCHAR(20) NOT NULL,
+prod_date DATE NOT NULL,
+old_weight NUMERIC,
+new_weight NUMERIC,
+logged_at TIMESTAMP
+);
+
+-- 프로시저 만들기(변경이력관리)
+-- prod_result 테이블의 닭의 무게 변경시
+-- 해당 테이블의 무게를 변경하면서 prod_log 테이블에 변경이력 로그를 남긴다.
+-- B2300020	2023-02-02	1500	N	12	P
+CALL fms.update_and_log_prod_weight('B2300020', '2023-02-02', 1136);
+
+ 체중 업데이트
+UPDATE fms.prod_result
+SET  raw_weight = 1136
+WHERE chick_no = 'B2300020' AND prod_date = '2023-02-02';
+UPDATE fms.prod_result
+SET  raw_weight = p.raw_weight
+WHERE chick_no = p.chick_no AND prod_date = p.prod_date;
+ 로그 테이블에 기록
+INSERT fms.prod_log
+(chick_no,prod_date,old_weight,new_weight,logged_at)
+VALUES ('B2300020','2023-02-02', 1500, 1136, now() );
+
+CREATE OR replace PROCEDURE update_and_log_prod_weight(
+	p_chick_no VARCHAR,
+	p_prod_date DATE,
+	p_raw_weight NUMERIC
+) AS $$
+declare
+	old_weight NUMERIC;
+	log_message TEXT;
+begin
+	select raw_weight into old_weight
+	from fms.prod_result
+	where chick_no = p_chick_no AND prod_date = p_prod_date;
+
+	if not found then
+		-- 데이터가 없는 경우의 예외처리부분
+		raise WARNING '경고: 해당하는 데이타가 없습니다. chick_no: %, prod_date: %', p_chick_no, p_prod_date;
+		log_message := '업데이트 대상 행 없음:' || p_chick_no || '( ' || p_prod_date || ')';
+		INSERT into fms.prod_log
+	(chick_no,prod_date,old_weight,new_weight,logged_at)
+	VALUES (p_chick_no,p_prod_date, NULL, NULL, now() );
+		return;
+	end if;
+	
+	UPDATE fms.prod_result
+	SET  raw_weight = p_raw_weight
+	WHERE chick_no = p_chick_no AND prod_date = p_prod_date;
+
+	INSERT into fms.prod_log
+	(chick_no,prod_date,old_weight,new_weight,logged_at)
+	VALUES (p_chick_no,p_prod_date, old_weight, p_raw_weight, now() );
+end;
+$$ LANGUAGE plpgsql;
+
+CALL fms.update_and_log_prod_weight('D2300020', '2023-02-02', 1136);
+
+-- 트리거 
+-- 데이터의 변경을 감지 로그 테이블 자동 기록
+-- 건강테이블에 데이터가 변경될때마다 감지하는 트리거
+-- 1. 로그테이블 health_cond( 건강상태 변경 이력로그)
+-- 2. 함수(로그테이블에 이력을 저장)
+-- 3. 트리거로 등록
+
+-- 1. 로그테이블
+CREATE TABLE fms.health_cond_audit (
+	audit_id SERIAL PRIMARY KEY,
+	chick_no VARCHAR(20) NOT NULL,
+	old_body_temp NUMERIC(4,1),
+	new_body_temp NUMERIC(4,1),
+	check_date DATE,
+	modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+	operation VARCHAR(10)
+);
+
+-- 2. 트리거 함수
+CREATE OR REPLACE FUNCTION fms.log_health_change()
+RETURNS trigger AS $$
+begin
+	if TG_OP = 'UPDATE' then -- OLD, NEW
+		raise notice 'UPDATE 트리거 실행중: % -> %', OLD.body_temp,
+		NEW.body_temp;
+		insert into fms.health_cond_audit
+		(chick_no, old_body_temp, new_body_temp, check_date, operation)
+		values(
+		OLD.chick_no,
+		OLD.body_temp,
+		NEW.body_temp,
+		NEW.check_date,
+		TG_OP
+		);
+	end if;
+	return NEW; -- 트리거 함수에서 업데이트된 행을 그대로 반환의 이미
+end;
+$$ LANGUAGE plpgsql;
+
+-- 3. 트리거 등록
+CREATE OR REPLACE TRIGGER health_audit_trigger
+AFTER UPDATE ON fms.health_cond
+FOR EACH ROW
+EXECUTE FUNCTION fms.log_health_change();
+
+UPDATE fms.health_cond
+SET body_temp = 45
+WHERE chick_no ='B2310019' AND check_date = '2023-01-10';
+
+-- 1. 환경이상 로그 테이블
+CREATE TABLE fms.env_anomaly (
+anomaly_id SERIAL PRIMARY KEY,
+farm CHAR(1),
+check_date DATE,
+temp NUMERIC(3,0),
+humid NUMERIC(3,0),
+reason TEXT,
+detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO fms.env_cond 
+(farm, date, temp, humid) 
+VALUES ('B', '2023-01-25', 21, 60); -- 정상 데이터
+
+INSERT INTO fms.env_cond 
+(farm, date, temp, humid) 
+VALUES ('B', '2023-01-25', 21, 85);  -- 이상치 데이터 입력시
+
+-- 2. 트리거 함수 구현 습도 값이 허용 범위(55~75)
+CREATE OR REPLACE FUNCTION fms.detect_env_abnomaly()
+RETURNS trigger AS $$
+begin
+	if new.humid > 75 or new.humid < 55 then
+		insert into fms.env_anomaly
+			(farm,check_date,temp,humid,reason)
+			values(
+			NEW.farm,
+			NEW.date,
+			NEW.temp,
+			NEW.humid,
+			case 
+				when new.humid > 75 then '습도 과다'
+				else '습도 부족'
+			end
+		);
+	end if;
+	return NEW; -- 트리거 함수에서 업데이트된 행을 그대로 반환의 이미
+end;
+$$ LANGUAGE plpgsql;
+
+-- 3. 트리거 함수 등록
+CREATE OR REPLACE TRIGGER env_abnomaly_trigger
+AFTER INSERT ON fms.env_cond
+FOR EACH ROW
+EXECUTE FUNCTION fms.detect_env_abnomaly();
+
+SELECT event_object_table AS table_name, trigger_name
+FROM information_schema.triggers
+GROUP BY table_name, trigger_name
+ORDER BY table_name, trigger_name;
+
+SELECT b.DESTINATION, sum(a.RAW_WEIGHT)
+FROM fms.prod_result a
+join fms.ship_result b
+ON a.CHICK_NO = b.CHICK_NO
+WHERE a.size_stand >= 11
+GROUP BY b.DESTINATION
+HAVING (sum(a.RAW_WEIGHT)/1000) >= 5
+ORDER BY sum(a.RAW_WEIGHT) DESC
+LIMIT 3;
