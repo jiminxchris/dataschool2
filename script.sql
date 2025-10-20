@@ -86,3 +86,98 @@ customer,count(chick_no)
 FROM fms.ship_result
 GROUP BY customer
 having count(chick_no)>=10;
+
+SELECT
+arrival_date,customer
+FROM fms.ship_result
+WHERE arrival_date >= '2023-02-05';
+
+SELECT
+customer,count(chick_no)
+FROM fms.ship_result
+WHERE arrival_date >= '2023-02-05'
+GROUP BY customer
+having count(chick_no)>=8;
+
+SELECT now();
+SELECT current_date;
+SELECT current_timestamp;
+SELECT current_timestamp::Date;
+
+SELECT 
+hatchday, 
+to_char(hatchday,'YYYY')
+FROM fms.chick_info;
+
+SELECT 
+hatchday, 
+to_char(hatchday,'Mon')
+FROM fms.chick_info;
+
+SELECT *
+FROM fms.env_cond
+WHERE humid IS NULL;
+
+SELECT farm, date, 
+humid, coalesce(humid, 60)
+FROM fms.env_cond
+WHERE date BETWEEN '2023-01-23' AND '2023-01-27';
+AND farm='A';
+
+SELECT 
+chick_no,
+gender,
+CASE gender
+	WHEN 'M' THEN '수컷'
+	WHEN 'F' THEN '암컷'
+	ELSE '성별미상'
+END "성별"
+FROM fms.chick_info;
+
+-- 스칼라 서브쿼리
+SELECT a.chick_no, 
+a.breeds,
+(
+	SELECT b.code_desc 
+	FROM fms.master_code b
+	WHERE b.column_nm = 'breeds'
+	AND b.code = a.breeds
+)
+FROM fms.chick_info a;
+
+SELECT code, code_desc 
+FROM fms.master_code
+WHERE column_nm = 'breeds';
+
+-- 인라인 뷰
+SELECT 
+a.chick_no, a.breeds,
+b.code_desc
+FROM fms.chick_info a,
+(
+	SELECT code, code_desc 
+	FROM fms.master_code
+	WHERE column_nm = 'breeds'
+) b
+WHERE a.breeds = b.code;
+
+CREATE OR REPLACE VIEW fms.breeds_prod
+(
+prod_data, breed_nm, total_sum
+)
+AS SELECT
+a.prod_date,
+(
+	SELECT m.code_desc AS breed_nm
+	FROM fms.master_code m
+	WHERE m.column_nm = 'breeds'
+	AND m.code = b.breeds
+),
+sum(a.raw_weight) AS total_sum
+from
+fms.prod_result a,
+fms.chick_info b
+WHERE
+a.chick_no = b.chick_no
+AND a.pass_fail='P'
+GROUP BY a.prod_date, b.breeds;
