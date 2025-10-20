@@ -181,3 +181,45 @@ WHERE
 a.chick_no = b.chick_no
 AND a.pass_fail='P'
 GROUP BY a.prod_date, b.breeds;
+
+CREATE OR REPLACE VIEW fms.daily_shipment_summary (
+    ship_date, 
+    customer_nm, 
+    breeds_nm, 
+    total_orders, 
+    total_chicks
+)
+AS
+SELECT
+    sr.arrival_date AS ship_date,  -- 도착일을 출하일로 간주
+    sr.customer AS customer_nm,
+    mc.code_desc AS breeds_nm,
+    COUNT(DISTINCT sr.order_no) AS total_orders, -- 주문 건수
+    COUNT(sr.chick_no) AS total_chicks           -- 출하된 병아리 총 개수
+FROM
+    fms.ship_result sr
+INNER JOIN
+    fms.chick_info ci ON sr.chick_no = ci.chick_no -- 육계 정보 조인
+INNER JOIN
+    fms.master_code mc ON ci.breeds = mc.code AND mc.column_nm = 'breeds' -- 품종명 가져오기
+GROUP BY
+    sr.arrival_date, sr.customer, mc.code_desc
+ORDER BY
+    ship_date, customer_nm;
+
+COMMENT ON VIEW fms.daily_shipment_summary IS '일별, 고객사별, 품종별 출하 요약 정보';
+
+
+-- 뷰의 전체 내용 조회 (복잡한 조인 및 집계 쿼리가 숨겨짐)
+SELECT * FROM fms.daily_shipment_summary;
+
+-- 뷰를 이용한 특정 조건 조회
+SELECT 
+    ship_date,
+    breeds_nm,
+    total_chicks
+FROM 
+    fms.daily_shipment_summary
+WHERE 
+    customer_nm = 'YESYES' 
+    AND ship_date >= '2023-02-04';
