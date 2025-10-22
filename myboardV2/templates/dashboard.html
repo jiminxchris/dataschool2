@@ -1,0 +1,21 @@
+{% extends 'base.html' %} {% block title %}대시보드{% endblock %} {% block
+content %}
+<div class="bg-white shadow-lg rounded-lg p-6">
+  <h2 class="text-2xl font-bold mb-6">농장 관리 시스템 대시보드</h2>
+
+  <div
+    class="flex justify-center items-center p-4 border border-gray-200 rounded-md"
+  >
+    <img
+      src="{{ url_for('static', filename=image_file) }}"
+      alt="품종별 최종 무게 분포 시각화 자료"
+      class="max-w-full h-auto"
+    />
+  </div>
+
+  <p class="mt-4 text-gray-600">
+    위 그래프는 품종별 최종 무게 분포를 보여주는 상자 그림(Box Plot)입니다.
+    데이터 분석을 통해 각 품종의 생산성을 비교할 수 있습니다.
+  </p>
+</div>
+{% endblock %}

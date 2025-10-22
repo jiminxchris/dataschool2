@@ -1,0 +1,27 @@
+{% extends 'base.html' %} {% block title %}FMS 결과 보기{% endblock %} {% block
+content %}
+<div class="bg-white shadow-lg rounded-lg p-6">
+  <h2 class="text-2xl font-bold mb-6">FMS 통합 결과</h2>
+
+  <div class="overflow-x-auto">
+    <table class="min-w-full bg-white border border-gray-300">
+      <thead class="bg-gray-100 text-gray-700">
+        <tr>
+          {% for column in results[0].keys() %}
+          <th class="py-2 px-4 border-b">{{ column }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody class="text-gray-600">
+        {% for row in results %}
+        <tr class="border-b hover:bg-gray-50">
+          {% for value in row.values() %}
+          <td class="py-2 px-4 border-b">{{ value }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
